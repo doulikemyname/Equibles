@@ -210,6 +210,153 @@ public class InsiderTradingToolsTransactionRenderingAndFilterTests
     }
 
     [Fact]
+    public async Task GetInsiderTransactions_DefaultMode_PreservesExistingSchema()
+    {
+        await using var db = NewDb();
+        EquityIssuer stock = NewStock();
+        var owner = NewOwner();
+        db.AddRange(stock, owner);
+        db.Add(
+            NewTransaction(
+                stock,
+                owner,
+                TransactionCode.Purchase,
+                AcquiredDisposed.Acquired,
+                "0001234567-24-000089"
+            )
+        );
+        await db.SaveChangesAsync();
+
+        var sut = Sut(db);
+        var output = await sut.GetInsiderTransactions("AAPL");
+        var explicitDefault = await sut.GetInsiderTransactions("AAPL", includeProvenance: false);
+
+        output.Should().Be(explicitDefault);
+        output
+            .Should()
+            .Contain(
+                "| Date | Insider | Role | Type | Shares | Price | Value | Owned After | Security | Ownership | 10b5-1 |"
+            );
+        output.Should().NotContain("| Filing Date |");
+        output.Should().NotContain("0001234567-24-000089");
+    }
+
+    [Fact]
+    public async Task GetInsiderTransactions_ProvenanceMode_RendersSourceFilingFacts()
+    {
+        await using var db = NewDb();
+        EquityIssuer stock = NewStock();
+        var owner = NewOwner(name: "Jane | Doe", cik: "0007654321");
+        db.AddRange(stock, owner);
+        var transaction = NewTransaction(
+            stock,
+            owner,
+            TransactionCode.Purchase,
+            AcquiredDisposed.Disposed,
+            "0001234567-24-000089",
+            transactionDate: new DateOnly(2024, 6, 1),
+            shares: 1250,
+            pricePerShare: 12.34m,
+            sharesOwnedAfter: 8750,
+            isRule10b5One: false
+        );
+        transaction.FilingDate = new DateOnly(2024, 6, 4);
+        transaction.FilingForm = InsiderOwnershipForm.Form4;
+        transaction.IsAmendment = true;
+        transaction.OriginalFilingDate = new DateOnly(2024, 6, 3);
+        transaction.SupersededAccessionNumber = "0001234567-24-000042";
+        transaction.SecurityKind = InsiderSecurityKind.NonDerivative;
+        transaction.OwnershipNature = OwnershipNature.Indirect;
+        db.Add(transaction);
+        await db.SaveChangesAsync();
+
+        var output = await Sut(db).GetInsiderTransactions("AAPL", includeProvenance: true);
+
+        output
+            .Should()
+            .Contain(
+                "| Transaction Date | Filing Date | Filing Form | Accession Number | Is Amendment | Original Filing Date | Superseded Accession Number | Owner CIK | Insider | Role | Type | Transaction Code | Acquired / Disposed | Shares | Price | Value | Owned After | Security | Security Kind | Ownership | 10b5-1 |"
+            );
+        output
+            .Should()
+            .Contain(
+                "| 2024-06-01 | 2024-06-04 | Form 4/A | 0001234567-24-000089 | Yes | 2024-06-03 | 0001234567-24-000042 | 0007654321 | Jane \\| Doe | Director | Buy | Purchase | Disposed | 1,250 | $12.34 | $15,425 | 8,750 | Common Stock | Non-derivative | Indirect | No |"
+            );
+        output.Should().NotContain("Creation Time");
+        output.Should().NotContain(transaction.CreationTime.ToString("O"));
+    }
+
+    [Fact]
+    public async Task GetInsiderTransactions_ProvenanceMode_RendersMissingOptionalFactsDeterministically()
+    {
+        await using var db = NewDb();
+        EquityIssuer stock = NewStock();
+        var owner = NewOwner();
+        db.AddRange(stock, owner);
+        var transaction = NewTransaction(
+            stock,
+            owner,
+            TransactionCode.Gift,
+            AcquiredDisposed.Acquired,
+            "0001234567-24-000090",
+            isRule10b5One: null
+        );
+        transaction.FilingForm = InsiderOwnershipForm.Unknown;
+        transaction.IsAmendment = false;
+        transaction.OriginalFilingDate = null;
+        transaction.SupersededAccessionNumber = null;
+        db.Add(transaction);
+        await db.SaveChangesAsync();
+
+        var output = await Sut(db).GetInsiderTransactions("AAPL", includeProvenance: true);
+
+        output
+            .Should()
+            .Contain(
+                "| 2024-06-01 | 2024-06-03 | Unknown | 0001234567-24-000090 | No | - | - | 0001234567 | John Doe | Director | Gift | Gift | Acquired | 1,000 | $100.00 | $100,000 | 5,000 | Common Stock | Unknown | Direct | - |"
+            );
+    }
+
+    [Fact]
+    public async Task GetInsiderTransactions_ProvenanceMode_PreservesTickerLimitAndReadOnlyBehaviour()
+    {
+        await using var db = NewDb();
+        EquityIssuer stock = NewStock();
+        var owner = NewOwner();
+        db.AddRange(stock, owner);
+        db.Add(
+            NewTransaction(
+                stock,
+                owner,
+                TransactionCode.Purchase,
+                AcquiredDisposed.Acquired,
+                "older-accession",
+                transactionDate: new DateOnly(2024, 5, 1)
+            )
+        );
+        db.Add(
+            NewTransaction(
+                stock,
+                owner,
+                TransactionCode.Sale,
+                AcquiredDisposed.Disposed,
+                "newer-accession",
+                transactionDate: new DateOnly(2024, 6, 1)
+            )
+        );
+        await db.SaveChangesAsync();
+        var transactionCount = await db.Set<InsiderTransaction>().CountAsync();
+
+        var output = await Sut(db)
+            .GetInsiderTransactions("aapl", maxResults: 1, includeProvenance: true);
+
+        output.Should().Contain("Apple Inc. (AAPL)");
+        output.Should().Contain("newer-accession");
+        output.Should().NotContain("older-accession");
+        (await db.Set<InsiderTransaction>().CountAsync()).Should().Be(transactionCount);
+    }
+
+    [Fact]
     public async Task GetInsiderTransactions_ZeroShareZeroBalanceRow_IsDropped()
     {
         await using var db = NewDb();
