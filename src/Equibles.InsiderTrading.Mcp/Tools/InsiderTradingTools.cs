@@ -84,7 +84,7 @@ public class InsiderTradingTools
         ReadOnly = true
     )]
     [Description(
-        "Get recent insider trading transactions for a stock from SEC Forms 4 and 5, newest first. Form 3 supplies initial ownership rather than a transaction. The Type column carries the SEC transaction code meaning: 'Buy'/'Sell' are open-market purchases/sales only, while Award, Conversion, Exercise, Tax Payment, Expiration, Gift, Inheritance, Discretionary and Other are compensation or derivative mechanics — not conviction trades. The 10b5-1 column marks trades made under a pre-arranged Rule 10b5-1 plan ('-' = filing predates the 2023 checkbox). Per-row Shares/Price/Value are as filed; Owned After is the post-transaction balance restated onto today's split basis, tracked per security kind and ownership form. Supports optional date-range, transaction-type and insider-name filters to reach history beyond the newest rows. Use this to understand insider buying/selling activity."
+        "Get recent insider transactions for a stock from SEC Forms 4 and 5, newest first. Form 3 reports initial ownership rather than a transaction. Type reflects SEC transaction semantics: Buy/Sell are open-market purchases/sales; Award, Conversion, Exercise, Tax Payment, Expiration, Gift, Inheritance, Discretionary and Other are distinct compensation or derivative mechanics. 10b5-1 is the filing's plan checkbox ('-' means unavailable). Shares/Price/Value are as filed; Owned After is restated onto today's split basis per security and ownership form. Set includeProvenance=true for SEC filing dates, form, accession, amendment linkage, owner CIK, source Acquired/Disposed and security kind. Supports date-range, transaction-type and insider-name filters."
     )]
     public Task<string> GetInsiderTransactions(
         [Description("Company ticker symbol (e.g., AAPL, MSFT)")] string ticker,
@@ -107,7 +107,11 @@ public class InsiderTradingTools
         [Description(
             "Only include transactions by insiders whose SEC-filed name contains every word of this value, case-insensitive (e.g. 'Huang') (optional)"
         )]
-            string insiderName = null
+            string insiderName = null,
+        [Description(
+            "Include detailed SEC filing provenance and source-native transaction fields (default: false)"
+        )]
+            bool includeProvenance = false
     )
     {
         return _runner.Execute(
@@ -200,12 +204,24 @@ public class InsiderTradingTools
                     "_Shares/Price/Value are as filed; Owned After is the post-transaction balance restated onto today's split basis. Security is the filed security title (kind when the filing names none) — balances are tracked per security and ownership form (see Security/Ownership), not as one running total per insider, so an issuer with several listed securities (e.g. ordinary shares and ADS) shows separate balances. 10b5-1 '-' means the filing predates the 2023 checkbox._"
                 );
                 sb.AppendLine();
-                sb.AppendLine(
-                    "| Date | Insider | Role | Type | Shares | Price | Value | Owned After | Security | Ownership | 10b5-1 |"
-                );
-                sb.AppendLine(
-                    "|------|---------|------|------|--------|-------|-------|-------------|----------|-----------|--------|"
-                );
+                if (includeProvenance)
+                {
+                    sb.AppendLine(
+                        "| Transaction Date | Filing Date | Filing Form | Accession Number | Is Amendment | Original Filing Date | Superseded Accession Number | Owner CIK | Insider | Role | Type | Transaction Code | Acquired / Disposed | Shares | Price | Value | Owned After | Security | Security Kind | Ownership | 10b5-1 |"
+                    );
+                    sb.AppendLine(
+                        "|------------------|-------------|-------------|------------------|--------------|----------------------|-----------------------------|-----------|---------|------|------|------------------|---------------------|--------|-------|-------|-------------|----------|---------------|-----------|--------|"
+                    );
+                }
+                else
+                {
+                    sb.AppendLine(
+                        "| Date | Insider | Role | Type | Shares | Price | Value | Owned After | Security | Ownership | 10b5-1 |"
+                    );
+                    sb.AppendLine(
+                        "|------|---------|------|------|--------|-------|-------|-------------|----------|-----------|--------|"
+                    );
+                }
                 sb.AppendRows(
                     transactions,
                     t =>
@@ -241,6 +257,19 @@ public class InsiderTradingTools
                             t.SecurityTitle,
                             t.SecurityKind.NameForHumans()
                         );
+                        if (includeProvenance)
+                        {
+                            var originalFilingDate =
+                                t.OriginalFilingDate?.ToString(
+                                    "yyyy-MM-dd",
+                                    CultureInfo.InvariantCulture
+                                ) ?? "-";
+                            var supersededAccession = MarkdownTable.EscapeCell(
+                                t.SupersededAccessionNumber,
+                                "-"
+                            );
+                            return $"| {t.TransactionDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} | {t.FilingDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} | {FormatFilingForm(t.FilingForm, t.IsAmendment)} | {MarkdownTable.EscapeCell(t.AccessionNumber, "-")} | {(t.IsAmendment ? "Yes" : "No")} | {originalFilingDate} | {supersededAccession} | {MarkdownTable.EscapeCell(t.InsiderOwner.OwnerCik, "-")} | {MarkdownTable.EscapeCell(t.InsiderOwner.Name)} | {MarkdownTable.EscapeCell(role)} | {type} | {t.TransactionCode.NameForHumans()} | {t.AcquiredDisposed.NameForHumans()} | {McpFormat.WholeNumber(t.Shares)} | ${McpFormat.Invariant(t.PricePerShare, "N2")} | ${McpFormat.WholeNumber(value)} | {McpFormat.WholeNumber(ownedAfter)} | {security} | {t.SecurityKind.NameForHumans()} | {t.OwnershipNature.NameForHumans()} | {plan} |";
+                        }
                         return $"| {t.TransactionDate:yyyy-MM-dd} | {t.InsiderOwner.Name} | {role} | {type} | {McpFormat.WholeNumber(t.Shares)} | ${McpFormat.Invariant(t.PricePerShare, "N2")} | ${McpFormat.WholeNumber(value)} | {McpFormat.WholeNumber(ownedAfter)} | {security} | {t.OwnershipNature.NameForHumans()} | {plan} |";
                     }
                 );
@@ -255,8 +284,20 @@ public class InsiderTradingTools
                 return sb.ToString();
             },
             "GetInsiderTransactions",
-            $"ticker: {ticker}, fromDate: {fromDate}, toDate: {toDate}, transactionType: {transactionType}, insiderName: {insiderName}"
+            $"ticker: {ticker}, fromDate: {fromDate}, toDate: {toDate}, transactionType: {transactionType}, insiderName: {insiderName}, includeProvenance: {includeProvenance}"
         );
+    }
+
+    private static string FormatFilingForm(InsiderOwnershipForm filingForm, bool isAmendment)
+    {
+        var form = filingForm switch
+        {
+            InsiderOwnershipForm.Form3 => "Form 3",
+            InsiderOwnershipForm.Form4 => "Form 4",
+            InsiderOwnershipForm.Form5 => "Form 5",
+            _ => "Unknown",
+        };
+        return isAmendment && filingForm != InsiderOwnershipForm.Unknown ? form + "/A" : form;
     }
 
     [McpServerTool(
