@@ -207,10 +207,10 @@ public class InsiderTradingTools
                 if (includeProvenance)
                 {
                     sb.AppendLine(
-                        "| Transaction Date | Filing Date | Filing Form | Accession Number | Is Amendment | Original Filing Date | Superseded Accession Number | Owner CIK | Insider | Role | Type | Transaction Code | Acquired / Disposed | Shares | Price | Value | Owned After | Security | Security Kind | Ownership | 10b5-1 |"
+                        "| Transaction Date | Common Stock ID | Filing Date | Filing Form | Accession Number | Is Amendment | Original Filing Date | Superseded Accession Number | Owner CIK | Insider | Role | Type | Transaction Code | Acquired / Disposed | Shares | Price | Value | Owned After | Security | Security Kind | Ownership | 10b5-1 |"
                     );
                     sb.AppendLine(
-                        "|------------------|-------------|-------------|------------------|--------------|----------------------|-----------------------------|-----------|---------|------|------|------------------|---------------------|--------|-------|-------|-------------|----------|---------------|-----------|--------|"
+                        "|------------------|-----------------|-------------|-------------|------------------|--------------|----------------------|-----------------------------|-----------|---------|------|------|------------------|---------------------|--------|-------|-------|-------------|----------|---------------|-----------|--------|"
                     );
                 }
                 else
@@ -268,7 +268,7 @@ public class InsiderTradingTools
                                 t.SupersededAccessionNumber,
                                 "-"
                             );
-                            return $"| {t.TransactionDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} | {t.FilingDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} | {FormatFilingForm(t.FilingForm, t.IsAmendment)} | {MarkdownTable.EscapeCell(t.AccessionNumber, "-")} | {(t.IsAmendment ? "Yes" : "No")} | {originalFilingDate} | {supersededAccession} | {MarkdownTable.EscapeCell(t.InsiderOwner.OwnerCik, "-")} | {MarkdownTable.EscapeCell(t.InsiderOwner.Name)} | {MarkdownTable.EscapeCell(role)} | {type} | {t.TransactionCode.NameForHumans()} | {t.AcquiredDisposed.NameForHumans()} | {McpFormat.WholeNumber(t.Shares)} | ${McpFormat.Invariant(t.PricePerShare, "N2")} | ${McpFormat.WholeNumber(value)} | {McpFormat.WholeNumber(ownedAfter)} | {security} | {t.SecurityKind.NameForHumans()} | {t.OwnershipNature.NameForHumans()} | {plan} |";
+                            return $"| {t.TransactionDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} | {t.CommonStockId} | {t.FilingDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} | {FormatFilingForm(t.FilingForm, t.IsAmendment)} | {MarkdownTable.EscapeCell(t.AccessionNumber, "-")} | {(t.IsAmendment ? "Yes" : "No")} | {originalFilingDate} | {supersededAccession} | {MarkdownTable.EscapeCell(t.InsiderOwner.OwnerCik, "-")} | {MarkdownTable.EscapeCell(t.InsiderOwner.Name)} | {MarkdownTable.EscapeCell(role)} | {type} | {t.TransactionCode.NameForHumans()} | {t.AcquiredDisposed.NameForHumans()} | {McpFormat.WholeNumber(t.Shares)} | ${McpFormat.Invariant(t.PricePerShare, "N2")} | ${McpFormat.WholeNumber(value)} | {McpFormat.WholeNumber(ownedAfter)} | {security} | {t.SecurityKind.NameForHumans()} | {t.OwnershipNature.NameForHumans()} | {plan} |";
                         }
                         return $"| {t.TransactionDate:yyyy-MM-dd} | {t.InsiderOwner.Name} | {role} | {type} | {McpFormat.WholeNumber(t.Shares)} | ${McpFormat.Invariant(t.PricePerShare, "N2")} | ${McpFormat.WholeNumber(value)} | {McpFormat.WholeNumber(ownedAfter)} | {security} | {t.OwnershipNature.NameForHumans()} | {plan} |";
                     }

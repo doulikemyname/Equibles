@@ -240,6 +240,8 @@ public class InsiderTradingToolsTransactionRenderingAndFilterTests
                 "| Date | Insider | Role | Type | Shares | Price | Value | Owned After | Security | Ownership | 10b5-1 |"
             );
         output.Should().NotContain("| Filing Date |");
+        output.Should().NotContain("Common Stock ID");
+        output.Should().NotContain(stock.Id.ToString());
         output.Should().NotContain("0001234567-24-000089");
     }
 
@@ -277,12 +279,12 @@ public class InsiderTradingToolsTransactionRenderingAndFilterTests
         output
             .Should()
             .Contain(
-                "| Transaction Date | Filing Date | Filing Form | Accession Number | Is Amendment | Original Filing Date | Superseded Accession Number | Owner CIK | Insider | Role | Type | Transaction Code | Acquired / Disposed | Shares | Price | Value | Owned After | Security | Security Kind | Ownership | 10b5-1 |"
+                "| Transaction Date | Common Stock ID | Filing Date | Filing Form | Accession Number | Is Amendment | Original Filing Date | Superseded Accession Number | Owner CIK | Insider | Role | Type | Transaction Code | Acquired / Disposed | Shares | Price | Value | Owned After | Security | Security Kind | Ownership | 10b5-1 |"
             );
         output
             .Should()
             .Contain(
-                "| 2024-06-01 | 2024-06-04 | Form 4/A | 0001234567-24-000089 | Yes | 2024-06-03 | 0001234567-24-000042 | 0007654321 | Jane \\| Doe | Director | Buy | Purchase | Disposed | 1,250 | $12.34 | $15,425 | 8,750 | Common Stock | Non-derivative | Indirect | No |"
+                $"| 2024-06-01 | {transaction.CommonStockId} | 2024-06-04 | Form 4/A | 0001234567-24-000089 | Yes | 2024-06-03 | 0001234567-24-000042 | 0007654321 | Jane \\| Doe | Director | Buy | Purchase | Disposed | 1,250 | $12.34 | $15,425 | 8,750 | Common Stock | Non-derivative | Indirect | No |"
             );
         output.Should().NotContain("Creation Time");
         output.Should().NotContain(transaction.CreationTime.ToString("O"));
@@ -315,7 +317,7 @@ public class InsiderTradingToolsTransactionRenderingAndFilterTests
         output
             .Should()
             .Contain(
-                "| 2024-06-01 | 2024-06-03 | Unknown | 0001234567-24-000090 | No | - | - | 0001234567 | John Doe | Director | Gift | Gift | Acquired | 1,000 | $100.00 | $100,000 | 5,000 | Common Stock | Unknown | Direct | - |"
+                $"| 2024-06-01 | {transaction.CommonStockId} | 2024-06-03 | Unknown | 0001234567-24-000090 | No | - | - | 0001234567 | John Doe | Director | Gift | Gift | Acquired | 1,000 | $100.00 | $100,000 | 5,000 | Common Stock | Unknown | Direct | - |"
             );
     }
 
