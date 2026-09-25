@@ -232,8 +232,10 @@ public class InsiderTradingToolsTransactionRenderingAndFilterTests
         var sut = Sut(db);
         var output = await sut.GetInsiderTransactions("AAPL");
         var explicitDefault = await sut.GetInsiderTransactions("AAPL", includeProvenance: false);
+        var explicitOffsetZero = await sut.GetInsiderTransactions("AAPL", offset: 0);
 
         output.Should().Be(explicitDefault);
+        output.Should().Be(explicitOffsetZero);
         output
             .Should()
             .Contain(
@@ -531,7 +533,239 @@ public class InsiderTradingToolsTransactionRenderingAndFilterTests
 
         var output = await Sut(db).GetInsiderTransactions("AAPL", maxResults: 2);
 
-        output.Should().Contain("Showing first 2 of 3 results - raise maxResults to see more.");
+        output
+            .Should()
+            .Contain(
+                "Showing results 1-2 of 3 - raise maxResults (max 500) or pass offset=2 to continue."
+            );
+    }
+
+    [Fact]
+    public async Task GetInsiderTransactions_Offset_ReturnsNextPageWithDefaultSchema()
+    {
+        await using var db = NewDb();
+        var stock = NewStock();
+        var owner = NewOwner();
+        db.AddRange(stock, owner);
+        db.Add(
+            NewTransaction(
+                stock,
+                owner,
+                TransactionCode.Purchase,
+                AcquiredDisposed.Acquired,
+                "old",
+                transactionDate: new DateOnly(2024, 1, 1)
+            )
+        );
+        db.Add(
+            NewTransaction(
+                stock,
+                owner,
+                TransactionCode.Purchase,
+                AcquiredDisposed.Acquired,
+                "middle",
+                transactionDate: new DateOnly(2024, 2, 1)
+            )
+        );
+        db.Add(
+            NewTransaction(
+                stock,
+                owner,
+                TransactionCode.Purchase,
+                AcquiredDisposed.Acquired,
+                "new",
+                transactionDate: new DateOnly(2024, 3, 1)
+            )
+        );
+        await db.SaveChangesAsync();
+
+        var firstPage = await Sut(db).GetInsiderTransactions("AAPL", maxResults: 1);
+        var secondPage = await Sut(db).GetInsiderTransactions("AAPL", maxResults: 1, offset: 1);
+
+        firstPage.Should().Contain("2024-03-01").And.NotContain("2024-02-01");
+        secondPage
+            .Should()
+            .Contain("2024-02-01")
+            .And.NotContain("2024-03-01")
+            .And.NotContain("2024-01-01");
+        secondPage.Should().Contain("Showing transactions 2-2 of 3");
+        secondPage
+            .Should()
+            .Contain(
+                "| Date | Insider | Role | Type | Shares | Price | Value | Owned After | Security | Ownership | 10b5-1 |"
+            );
+        secondPage.Should().NotContain("Common Stock ID");
+    }
+
+    [Fact]
+    public async Task GetInsiderTransactions_Offset_ReturnsFinalPartialPage()
+    {
+        await using var db = NewDb();
+        var stock = NewStock();
+        var owner = NewOwner();
+        db.AddRange(stock, owner);
+        for (var month = 1; month <= 3; month++)
+        {
+            db.Add(
+                NewTransaction(
+                    stock,
+                    owner,
+                    TransactionCode.Purchase,
+                    AcquiredDisposed.Acquired,
+                    $"acc-{month}",
+                    transactionDate: new DateOnly(2024, month, 1)
+                )
+            );
+        }
+        await db.SaveChangesAsync();
+
+        var output = await Sut(db).GetInsiderTransactions("AAPL", maxResults: 2, offset: 2);
+
+        output
+            .Should()
+            .Contain("2024-01-01")
+            .And.NotContain("2024-02-01")
+            .And.NotContain("2024-03-01");
+        output.Should().Contain("Showing results 3-3 of 3 (the last page).");
+    }
+
+    [Fact]
+    public async Task GetInsiderTransactions_OffsetPastEnd_ReturnsExplicitError()
+    {
+        await using var db = NewDb();
+        var stock = NewStock();
+        var owner = NewOwner();
+        db.AddRange(stock, owner);
+        db.Add(
+            NewTransaction(
+                stock,
+                owner,
+                TransactionCode.Purchase,
+                AcquiredDisposed.Acquired,
+                "acc-1"
+            )
+        );
+        await db.SaveChangesAsync();
+
+        var output = await Sut(db).GetInsiderTransactions("AAPL", offset: 1);
+
+        output
+            .Should()
+            .Be("No results at offset 1 - only 1 insider transactions match; lower offset.");
+    }
+
+    [Fact]
+    public async Task GetInsiderTransactions_OffsetPaging_TiedDatesSplitDeterministically()
+    {
+        await using var db = NewDb();
+        var stock = NewStock();
+        var ownerA = NewOwner("Owner A", "0000000001");
+        var ownerB = NewOwner("Owner B", "0000000002");
+        var ownerC = NewOwner("Owner C", "0000000003");
+        var ownerD = NewOwner("Owner D", "0000000004");
+        db.AddRange(stock, ownerA, ownerB, ownerC, ownerD);
+        var transactionDate = new DateOnly(2024, 6, 1);
+        db.Add(
+            NewTransaction(
+                stock,
+                ownerD,
+                TransactionCode.Purchase,
+                AcquiredDisposed.Acquired,
+                "acc-d",
+                transactionDate
+            )
+        );
+        db.Add(
+            NewTransaction(
+                stock,
+                ownerB,
+                TransactionCode.Purchase,
+                AcquiredDisposed.Acquired,
+                "acc-b",
+                transactionDate
+            )
+        );
+        db.Add(
+            NewTransaction(
+                stock,
+                ownerA,
+                TransactionCode.Purchase,
+                AcquiredDisposed.Acquired,
+                "acc-a",
+                transactionDate
+            )
+        );
+        db.Add(
+            NewTransaction(
+                stock,
+                ownerC,
+                TransactionCode.Purchase,
+                AcquiredDisposed.Acquired,
+                "acc-c",
+                transactionDate
+            )
+        );
+        await db.SaveChangesAsync();
+
+        var firstPage = await Sut(db).GetInsiderTransactions("AAPL", maxResults: 2);
+        var secondPage = await Sut(db).GetInsiderTransactions("AAPL", maxResults: 2, offset: 2);
+
+        firstPage.Should().Contain("Owner A").And.Contain("Owner B");
+        firstPage.Should().NotContain("Owner C").And.NotContain("Owner D");
+        secondPage.Should().Contain("Owner C").And.Contain("Owner D");
+        secondPage.Should().NotContain("Owner A").And.NotContain("Owner B");
+        firstPage
+            .IndexOf("Owner A", StringComparison.Ordinal)
+            .Should()
+            .BeLessThan(firstPage.IndexOf("Owner B", StringComparison.Ordinal));
+        secondPage
+            .IndexOf("Owner C", StringComparison.Ordinal)
+            .Should()
+            .BeLessThan(secondPage.IndexOf("Owner D", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GetInsiderTransactions_ProvenanceMode_PagedRowRetainsSourceFilingFacts()
+    {
+        await using var db = NewDb();
+        CommonStock stock = NewStock();
+        var owner = NewOwner(name: "Jane Doe", cik: "0007654321");
+        db.AddRange(stock, owner);
+        var older = NewTransaction(
+            stock,
+            owner,
+            TransactionCode.Purchase,
+            AcquiredDisposed.Acquired,
+            "older-accession",
+            transactionDate: new DateOnly(2024, 5, 1)
+        );
+        older.FilingDate = new DateOnly(2024, 5, 3);
+        older.FilingForm = InsiderOwnershipForm.Form4;
+        older.SecurityKind = InsiderSecurityKind.NonDerivative;
+        db.Add(older);
+        db.Add(
+            NewTransaction(
+                stock,
+                owner,
+                TransactionCode.Sale,
+                AcquiredDisposed.Disposed,
+                "newer-accession",
+                transactionDate: new DateOnly(2024, 6, 1)
+            )
+        );
+        await db.SaveChangesAsync();
+
+        var output = await Sut(db)
+            .GetInsiderTransactions("AAPL", maxResults: 1, offset: 1, includeProvenance: true);
+
+        output.Should().Contain("| Transaction Date | Common Stock ID | Filing Date |");
+        output
+            .Should()
+            .Contain(
+                $"| 2024-05-01 | {older.CommonStockId} | 2024-05-03 | Form 4 | older-accession |"
+            );
+        output.Should().NotContain("newer-accession");
+        output.Should().NotContain("Creation Time");
     }
 
     [Fact]

@@ -108,6 +108,8 @@ public class InsiderTradingTools
             "Only include transactions by insiders whose SEC-filed name contains every word of this value, case-insensitive (e.g. 'Huang') (optional)"
         )]
             string insiderName = null,
+        [Description("Number of matching transactions to skip before returning rows (default: 0)")]
+            int offset = 0,
         [Description(
             "Include detailed SEC filing provenance and source-native transaction fields (default: false)"
         )]
@@ -122,6 +124,7 @@ public class InsiderTradingTools
                     return stockError;
 
                 maxResults = McpLimit.Clamp(maxResults);
+                offset = McpLimit.ClampOffset(offset);
 
                 var query = _transactionRepository
                     .GetByStockWithOwner(stock)
@@ -180,8 +183,14 @@ public class InsiderTradingTools
                 }
 
                 var total = await query.CountAsync();
-                var transactions = await query.OrderNewestFirst().Take(maxResults).ToListAsync();
+                var transactions = await query
+                    .OrderNewestFirst()
+                    .Skip(offset)
+                    .Take(maxResults)
+                    .ToListAsync();
 
+                if (transactions.Count == 0 && offset > 0)
+                    return $"No results at offset {offset} - only {total} insider transactions match; lower offset.";
                 if (transactions.Count == 0)
                     return filtered
                         ? $"No insider transactions found for {stock.Ticker} matching the given filters."
@@ -199,7 +208,11 @@ public class InsiderTradingTools
 
                 var sb = new StringBuilder();
                 sb.AppendLine($"Recent insider transactions for {stock.Name} ({stock.Ticker}):");
-                sb.AppendLine($"Showing {transactions.Count} most recent transactions");
+                sb.AppendLine(
+                    offset == 0
+                        ? $"Showing {transactions.Count} most recent transactions"
+                        : $"Showing transactions {offset + 1}-{offset + transactions.Count} of {total}"
+                );
                 sb.AppendLine(
                     "_Shares/Price/Value are as filed; Owned After is the post-transaction balance restated onto today's split basis. Security is the filed security title (kind when the filing names none) — balances are tracked per security and ownership form (see Security/Ownership), not as one running total per insider, so an issuer with several listed securities (e.g. ordinary shares and ADS) shows separate balances. 10b5-1 '-' means the filing predates the 2023 checkbox._"
                 );
@@ -274,7 +287,7 @@ public class InsiderTradingTools
                     }
                 );
 
-                var truncation = McpOutput.TruncationNote(transactions.Count, total);
+                var truncation = McpOutput.PagedTruncationNote(transactions.Count, total, offset);
                 if (truncation.Length > 0)
                 {
                     sb.AppendLine();
@@ -284,7 +297,7 @@ public class InsiderTradingTools
                 return sb.ToString();
             },
             "GetInsiderTransactions",
-            $"ticker: {ticker}, fromDate: {fromDate}, toDate: {toDate}, transactionType: {transactionType}, insiderName: {insiderName}, includeProvenance: {includeProvenance}"
+            $"ticker: {ticker}, fromDate: {fromDate}, toDate: {toDate}, transactionType: {transactionType}, insiderName: {insiderName}, offset: {offset}, includeProvenance: {includeProvenance}"
         );
     }
 
